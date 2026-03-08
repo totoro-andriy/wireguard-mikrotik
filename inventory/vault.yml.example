@@ -1,0 +1,16 @@
+---
+# Приклад vault файлу для зберігання чутливих даних
+# Створіть власний vault файл:
+# ansible-vault create inventory/vault.yml
+
+# Паролі для підключення до MikroTik
+vault_mikrotik_admin_password: "your_secure_password_here"
+
+# SSH ключі (опціонально)
+vault_ssh_private_key: |
+  -----BEGIN OPENSSH PRIVATE KEY-----
+  ...
+  -----END OPENSSH PRIVATE KEY-----
+
+# API токени (якщо використовуєте)
+vault_api_token: "your_api_token_here"

@@ -1,0 +1,20 @@
+---
+# Ansible lint конфігурація
+skip_list:
+  - yaml[line-length]
+  - name[casing]
+  - fqcn[action-core]
+  - jinja[spacing]
+  - var-naming[no-role-prefix]
+
+exclude_paths:
+  - .cache/
+  - .git/
+  - venv/
+  - collections/
+
+warn_list:
+  - experimental
+  - role-name
+
+use_default_rules: true

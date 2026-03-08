@@ -1,0 +1,19 @@
+---
+# Main tasks файл для ролі wireguard_mikrotik
+
+- name: "Створити директорію для конфігурацій"
+  file:
+    path: "{{ configs_output_dir }}"
+    state: directory
+    mode: '0755'
+  delegate_to: localhost
+  run_once: true
+  when: generate_client_config | bool
+
+- name: "Включити tasks для додавання peer"
+  include_tasks: add_peer.yml
+  when: wg_action == "add"
+
+- name: "Включити tasks для видалення peer"
+  include_tasks: remove_peer.yml
+  when: wg_action == "remove"

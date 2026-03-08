@@ -1,0 +1,41 @@
+---
+all:
+  children:
+    wireguard_servers:
+      hosts:
+        srv-01.mood.pp.ua:
+          ansible_host: "127.0.0.1"
+          ansible_network_os: community.routeros.routeros
+          ansible_connection: network_cli
+          ansible_user: "some_user"
+          ansible_password: "some_password"
+          ansible_port: 1234
+          ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
+          
+          # WireGuard конфігурація сервера
+          wg_interface: "fly"
+          wg_listen_port: 62356
+          wg_server_ip: "10.66.66.1"
+          wg_server_network: "10.66.66.0/24"
+          wg_server_private_key: "PLACEHOLDER_PRIVATE_KEY_REPLACE_ME_BEFORE_USE"
+          
+          # VXLAN конфігурація
+          vxlan_interface: "vxlan1"
+          vxlan_vni: 100
+          vxlan_local_address: "10.66.66.1"
+          
+          # Bridge конфігурація
+          bridge_interface: "br_x"
+          bridge_network: "172.16.0.0/16"
+          bridge_gateway: "172.16.0.1"
+          dhcp_pool_start: "172.16.0.2"
+          dhcp_pool_end: "172.16.255.254"
+    
+    wireguard_clients:
+      hosts:
+        # Приклад існуючих клієнтів
+        # Додайте нових клієнтів тут
+        # peer4:
+        #   wg_client_ip: "10.66.66.5"
+        #   wg_public_key: "генеруйте за допомогою scripts/generate_keys.py"
+        #   wg_preshared_key: "генеруйте за допомогою scripts/generate_keys.py"

@@ -1,0 +1,36 @@
+---
+# Playbook для перегляду поточної конфігурації WireGuard на сервері
+- name: "Отримати інформацію про WireGuard"
+  hosts: wireguard_servers
+  gather_facts: false
+  
+  tasks:
+    - name: "Отримати список WireGuard інтерфейсів"
+      community.routeros.command:
+        commands:
+          - /interface wireguard print detail
+      register: wg_interfaces
+    
+    - name: "Отримати список WireGuard peers"
+      community.routeros.command:
+        commands:
+          - /interface wireguard peers print detail without-paging
+      register: wg_peers
+    
+    - name: "Отримати список VXLAN vteps"
+      community.routeros.command:
+        commands:
+          - /interface vxlan vteps print detail
+      register: vxlan_vteps
+    
+    - name: "Вивести інформацію про WireGuard"
+      debug:
+        msg:
+          - "=== WireGuard Інтерфейси ==="
+          - "{{ wg_interfaces.stdout_lines }}"
+          - ""
+          - "=== WireGuard Peers ==="
+          - "{{ wg_peers.stdout_lines }}"
+          - ""
+          - "=== VXLAN VTEPs ==="
+          - "{{ vxlan_vteps.stdout_lines }}"

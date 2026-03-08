@@ -1,0 +1,44 @@
+---
+# Defaults для ролі wireguard_mikrotik
+
+# Дія: add, remove, update
+wg_action: "add"
+
+# Назва клієнта
+wg_client_name: ""
+
+# IP адреса клієнта в WireGuard мережі
+wg_client_ip: ""
+
+# Публічний ключ клієнта
+wg_client_public_key: ""
+
+# Приватний ключ клієнта (для генерації конфігу)
+wg_client_private_key: ""
+
+# Preshared ключ (опціонально, але рекомендовано)
+wg_client_preshared_key: ""
+
+# Persistent keepalive для клієнта (за замовчуванням 10s)
+wg_client_keepalive: "10s"
+
+# VXLAN remote IP (зазвичай збігається з WireGuard IP)
+vxlan_client_remote_ip: "{{ wg_client_ip | regex_replace('/32', '') }}"
+
+# VXLAN VNI (передається з playbook)
+# Для 10.66.66.12 → VNI буде 612 (concat '6' + '12')
+# Для 10.66.66.5 → VNI буде 65 (concat '6' + '5')
+# Для 10.66.66.100 → VNI буде 6100 (concat '6' + '100')
+# vxlan_vni: передається явно з playbook
+
+# VXLAN local address (IP сервера)
+vxlan_local_address: "{{ hostvars[groups['wireguard_servers'][0]]['vxlan_local_address'] | default('10.66.66.1') }}"
+
+# Bridge інтерфейс на сервері
+bridge_interface: "{{ hostvars[groups['wireguard_servers'][0]]['bridge_interface'] | default('br_x') }}"
+
+# Генерувати конфігурацію для клієнта
+generate_client_config: true
+
+# Додати VXLAN інтерфейс для клієнта
+add_vxlan_vtep: true

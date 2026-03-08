@@ -1,0 +1,23 @@
+---
+# Глобальні налаштування для всіх хостів
+ansible_python_interpreter: /usr/bin/python3
+
+# WireGuard налаштування
+wg_mtu: 1420
+wg_allowed_addresses: "10.66.66.0/24"
+
+# Шлях для збереження згенерованих конфігурацій
+configs_output_dir: "{{ playbook_dir }}/../generated_configs"
+
+# Шлях для збереження ключів клієнтів
+client_keys_dir: "{{ playbook_dir }}/../client_keys"
+
+# DNS сервери для клієнтів
+dns_servers: "8.8.8.8,1.1.1.1"
+
+# Таймаут для підключень
+ansible_command_timeout: 60
+ansible_connect_timeout: 30
+
+# SSH ключ для доступу до всіх клієнтів
+ssh_public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIO1rCFMg3JQfsvb27NiXtbKAfT9MQuLqBk0p2uspubNH MainSSH"

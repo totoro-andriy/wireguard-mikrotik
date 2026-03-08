@@ -1,0 +1,73 @@
+---
+# Tasks для додавання WireGuard peer
+
+- name: "Додати WireGuard peer {{ wg_client_name }}"
+  community.routeros.command:
+    commands:
+      - /interface wireguard peers add
+        name={{ wg_client_name }}
+        interface={{ wg_interface }}
+        public-key="{{ wg_client_public_key }}"
+        preshared-key="{{ wg_client_preshared_key }}"
+        allowed-address={{ wg_client_ip }}/32
+        client-address={{ wg_client_ip }}/32
+        responder=yes
+        persistent-keepalive={{ wg_client_keepalive }}
+  register: add_peer_result
+  failed_when: 
+    - add_peer_result.failed
+    - "'already exists' not in add_peer_result.msg | default('')"
+
+- name: "Створити окремий VXLAN інтерфейс для {{ wg_client_name }}"
+  community.routeros.command:
+    commands:
+      - /interface vxlan add
+        name=vxlan-{{ wg_client_name }}
+        vni={{ vxlan_vni }}
+        local-address={{ vxlan_local_address }}
+        comment="VXLAN for {{ wg_client_name }}"
+  when: add_vxlan_vtep | bool
+  register: add_vxlan_result
+  failed_when:
+    - add_vxlan_result.failed
+    - "'already exists' not in add_vxlan_result.msg | default('')"
+
+- name: "Додати VXLAN vtep для {{ wg_client_name }}"
+  community.routeros.command:
+    commands:
+      - /interface vxlan vteps add
+        interface=vxlan-{{ wg_client_name }}
+        remote-ip={{ vxlan_client_remote_ip }}
+  when: add_vxlan_vtep | bool
+  register: add_vtep_result
+  failed_when:
+    - add_vtep_result.failed
+    - "'already exists' not in add_vtep_result.msg | default('')"
+
+- name: "Додати VXLAN інтерфейс {{ wg_client_name }} до bridge"
+  community.routeros.command:
+    commands:
+      - /interface bridge port add
+        interface=vxlan-{{ wg_client_name }}
+        bridge={{ bridge_interface }}
+        comment="{{ wg_client_name }} VXLAN to bridge"
+  when: add_vxlan_vtep | bool
+  register: add_bridge_port_result
+  failed_when:
+    - add_bridge_port_result.failed
+    - "'already exists' not in add_bridge_port_result.msg | default('')"
+
+- name: "Згенерувати конфігурацію клієнта {{ wg_client_name }}"
+  template:
+    src: client_config.rsc.j2
+    dest: "{{ configs_output_dir }}/{{ wg_client_name }}.rsc"
+    mode: '0600'
+  when: generate_client_config | bool
+  delegate_to: localhost
+
+- name: "Вивести інформацію про додавання"
+  debug:
+    msg:
+      - "WireGuard peer {{ wg_client_name }} успішно додано"
+      - "IP адреса: {{ wg_client_ip }}"
+      - "Конфігурація збережена в: {{ configs_output_dir }}/{{ wg_client_name }}.rsc"

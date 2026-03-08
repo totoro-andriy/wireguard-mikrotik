@@ -1,0 +1,51 @@
+---
+# Playbook для отримання публічного ключа WireGuard сервера
+- name: "Отримати публічний ключ сервера"
+  hosts: wireguard_servers
+  gather_facts: false
+  
+  tasks:
+    - name: "Отримати приватний ключ WireGuard"
+      community.routeros.command:
+        commands:
+          - /interface wireguard print detail
+      register: wg_details
+    
+    - name: "Зберегти приватний ключ для обробки"
+      set_fact:
+        server_private_key: "{{ wg_server_private_key }}"
+    
+    - name: "Показати приватний ключ сервера"
+      debug:
+        msg: "Приватний ключ сервера: {{ server_private_key }}"
+    
+    - name: "Обчислити публічний ключ"
+      shell: |
+        python3 scripts/get_public_key.py "{{ server_private_key }}"
+      register: server_public_key_result
+      delegate_to: localhost
+      changed_when: false
+    
+    - name: "Показати публічний ключ сервера"
+      debug:
+        msg: |
+          ═══════════════════════════════════════════════════════════
+          🔑 Публічний ключ WireGuard сервера:
+          ───────────────────────────────────────────────────────────
+          {{ server_public_key_result.stdout }}
+          ═══════════════════════════════════════════════════════════
+          
+          💡 Використовуйте цей ключ в конфігураціях клієнтів
+          
+          Цей ключ потрібно вказати в налаштуваннях WireGuard peer
+          на кожному клієнті як public-key сервера.
+    
+    - name: "Зберегти публічний ключ у файл"
+      copy:
+        content: "{{ server_public_key_result.stdout }}"
+        dest: "{{ playbook_dir }}/../server_public_key.txt"
+      delegate_to: localhost
+    
+    - name: "Підсумок"
+      debug:
+        msg: "Публічний ключ сервера збережено у файл server_public_key.txt"

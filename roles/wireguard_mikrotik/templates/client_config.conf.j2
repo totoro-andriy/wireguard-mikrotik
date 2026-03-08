@@ -1,0 +1,18 @@
+# Конфігурація WireGuard клієнта: {{ wg_client_name }}
+# Формат для Linux/Unix систем
+# Дата генерації: {{ ansible_date_time.iso8601 | default('') }}
+
+[Interface]
+PrivateKey = {{ wg_client_private_key }}
+Address = {{ wg_client_ip }}/{{ hostvars[groups['wireguard_servers'][0]]['wg_server_network'].split('/')[-1] }}
+DNS = {{ dns_servers }}
+MTU = {{ wg_mtu }}
+
+[Peer]
+PublicKey = QmOqGj4vAgWfmVxkc0xoqQZ4N7+P833VHs+xXJdhCxY=
+PresharedKey = {{ wg_client_preshared_key }}
+Endpoint = {{ hostvars[groups['wireguard_servers'][0]]['ansible_host'] }}:{{ hostvars[groups['wireguard_servers'][0]]['wg_listen_port'] }}
+AllowedIPs = {{ wg_allowed_addresses }}
+PersistentKeepalive = 10
+
+# Примітка: цей файл для не-MikroTik клієнтів (Linux, Windows, macOS)

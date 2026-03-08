@@ -1,0 +1,323 @@
+# {{ ansible_managed }}
+# Повна конфігурація WireGuard клієнта: {{ wg_client_name }}
+# Дата генерації: {{ ansible_date_time.iso8601 | default('') }}
+# IP адреса: {{ wg_client_ip }}
+#
+# ВАЖЛИВО: Перед імпортом:
+# 1. Підключіться до роутера через MAC-Winbox або консоль
+# 2. Створіть SSH ключ і додайте його (див. нижче секцію SSH)
+# 3. Імпортуйте: /import file={{ wg_client_name }}.rsc
+
+# ============================================================================
+# ВИМКНЕННЯ WiFi ІНТЕРФЕЙСІВ
+# ============================================================================
+
+/interface
+set [ find type="wifi" ] disabled=yes
+
+# ============================================================================
+# НАЛАШТУВАННЯ ІНТЕРФЕЙСІВ
+# ============================================================================
+
+# Створення bridge для локальної мережі
+/interface bridge
+add fast-forward=no name=br_x protocol-mode=none comment="Bridge for local network + VXLAN"
+
+# WireGuard інтерфейс
+/interface wireguard
+add listen-port=51820 mtu={{ wg_mtu }} name=wg0 private-key="{{ wg_client_private_key }}" \
+    comment="WireGuard VPN to server"
+
+# WireGuard peer (підключення до сервера)
+/interface wireguard peers
+add allowed-address={{ wg_allowed_addresses }} \
+    endpoint-address={{ hostvars[groups['wireguard_servers'][0]]['ansible_host'] }} \
+    endpoint-port={{ hostvars[groups['wireguard_servers'][0]]['wg_listen_port'] }} \
+    interface=wg0 \
+    name=server \
+    persistent-keepalive=10s \
+    preshared-key="{{ wg_client_preshared_key }}" \
+    public-key="QmOqGj4vAgWfmVxkc0xoqQZ4N7+P833VHs+xXJdhCxY=" \
+    comment="Server peer"
+
+# VXLAN інтерфейс для L2 зв'язності
+/interface vxlan
+add allow-fast-path=no \
+    local-address={{ wg_client_ip | regex_replace('/32', '') }} \
+    mac-address={{ '02:00:00:00:00:%02x' | format(wg_client_ip.split('.')[-1] | int) }} \
+    name=vxlan1 \
+    vni={{ vxlan_vni }} \
+    comment="VXLAN for L2 network"
+
+# VXLAN vtep (підключення до сервера)
+/interface vxlan vteps
+add interface=vxlan1 remote-ip={{ hostvars[groups['wireguard_servers'][0]]['vxlan_local_address'] }}
+
+# Додавання інтерфейсів до bridge
+# ether1 = WAN, всі інші ether = bridge
+/interface bridge port
+add bridge=br_x interface=vxlan1 comment="VXLAN to bridge"
+add bridge=br_x interface=ether2 comment="LAN port" hw=yes
+add bridge=br_x interface=ether3 comment="LAN port" hw=yes
+add bridge=br_x interface=ether4 comment="LAN port" hw=yes
+# Додайте більше портів якщо потрібно
+
+# ether1 залишається для WAN (не в bridge)
+/interface ethernet
+set [ find default-name=ether1 ] comment="WAN interface"
+
+# ============================================================================
+# IP АДРЕСАЦІЯ
+# ============================================================================
+
+# IP адреса WireGuard інтерфейсу
+/ip address
+add address={{ wg_client_ip }}/{{ hostvars[groups['wireguard_servers'][0]]['wg_server_network'].split('/')[-1] }} \
+    interface=wg0 network={{ hostvars[groups['wireguard_servers'][0]]['wg_server_network'].split('/')[0] }} \
+    comment="WireGuard IP"
+
+# DHCP клієнт на WAN інтерфейсі
+/ip dhcp-client
+add interface=ether1 use-peer-dns=no use-peer-ntp=yes add-default-route=yes \
+    comment="WAN DHCP client"
+
+# DHCP клієнт на bridge (отримання IP з пулу сервера через VXLAN)
+/ip dhcp-client
+add interface=br_x use-peer-dns=yes use-peer-ntp=yes add-default-route=no \
+    comment="Bridge DHCP client"
+
+# ============================================================================
+# DNS
+# ============================================================================
+/ip dns
+set servers={{ dns_servers }} allow-remote-requests=no
+
+# ============================================================================
+# FIREWALL - ПОВНИЙ ЗАХИСТ
+# ============================================================================
+
+# Списки адрес для firewall
+/ip firewall address-list
+add address={{ hostvars[groups['wireguard_servers'][0]]['wg_server_network'] }} list=vpn_network comment="VPN network"
+add address={{ hostvars[groups['wireguard_servers'][0]]['bridge_network'] }} list=bridge_network comment="Bridge network"
+
+# INPUT CHAIN - захист роутера
+/ip firewall filter
+add action=accept chain=input in-interface=wg0
+# Дозволити встановлені з'єднання
+add action=accept chain=input connection-state=established,related \
+    comment="Accept established/related"
+
+# Дозволити loopback
+add action=accept chain=input in-interface=wg0 src-address=127.0.0.1 \
+    comment="Accept loopback"
+
+# Дозволити ICMP (ping) тільки з VPN та bridge
+add action=accept chain=input protocol=icmp in-interface=wg0 \
+    comment="Accept ICMP from VPN"
+add action=accept chain=input protocol=icmp in-interface=br_x \
+    comment="Accept ICMP from bridge"
+
+# Дозволити SSH тільки з VPN (порт 22)
+add action=accept chain=input protocol=tcp dst-port=22 in-interface=wg0 \
+    comment="Accept SSH from VPN only"
+
+# Дозволити Winbox тільки з VPN (порт 8291)
+add action=accept chain=input protocol=tcp dst-port=8291 in-interface=wg0 \
+    comment="Accept Winbox from VPN only"
+
+# Дозволити повний доступ з bridge (для локальної мережі)
+add action=accept chain=input in-interface=br_x \
+    comment="Accept from bridge"
+
+# Дозволити WireGuard traffic на WAN
+add action=accept chain=input protocol=udp dst-port=51820 in-interface=ether1 \
+    comment="Accept WireGuard on WAN"
+
+# ВАЖЛИВО: Дропати все інше на INPUT
+add action=drop chain=input in-interface=ether1 \
+    comment="Drop all from WAN"
+add action=drop chain=input \
+    comment="Drop all other input"
+
+# FORWARD CHAIN - для routing між інтерфейсами
+# Дозволити встановлені з'єднання
+add action=accept chain=forward connection-state=established,related \
+    comment="Accept established/related"
+
+# Дозволити весь трафік між bridge та VXLAN (без обмежень всередині)
+add action=accept chain=forward in-interface=br_x out-interface=br_x \
+    comment="Accept bridge to bridge"
+add action=accept chain=forward in-interface=vxlan1 out-interface=br_x \
+    comment="Accept VXLAN to bridge"
+add action=accept chain=forward in-interface=br_x out-interface=vxlan1 \
+    comment="Accept bridge to VXLAN"
+
+# Дозволити з VPN
+add action=accept chain=forward in-interface=wg0 \
+    comment="Accept from VPN"
+
+# НЕ ДОЗВОЛЯТИ bridge -> Internet (клієнтам бріджа інтернет не потрібний)
+add action=drop chain=forward in-interface=br_x out-interface=ether1 \
+    comment="Block bridge to Internet"
+
+# Дропати недійсні пакети
+add action=drop chain=forward connection-state=invalid \
+    comment="Drop invalid"
+
+# Дропати все інше з WAN
+add action=drop chain=forward in-interface=ether1 \
+    comment="Drop all from WAN"
+
+# ============================================================================
+# FIREWALL - ДОДАТКОВА БЕЗПЕКА
+# ============================================================================
+
+# RAW chain - захист від сканування та атак
+/ip firewall raw
+add action=drop chain=prerouting in-interface=ether1 src-address-list=blocked \
+    comment="Drop blocked IPs"
+
+# Захист від port scanning
+add action=add-src-to-address-list address-list=port_scanners address-list-timeout=1d \
+    chain=prerouting protocol=tcp psd=21,3s,3,1 in-interface=ether1 \
+    comment="Detect port scanners"
+add action=drop chain=prerouting src-address-list=port_scanners in-interface=ether1 \
+    comment="Drop port scanners"
+
+# Захист від SSH brute force
+/ip firewall filter
+add action=add-src-to-address-list address-list=ssh_blacklist address-list-timeout=1d \
+    chain=input protocol=tcp dst-port=22 src-address-list=ssh_stage3 \
+    comment="SSH brute force - add to blacklist"
+add action=add-src-to-address-list address-list=ssh_stage3 address-list-timeout=1m \
+    chain=input protocol=tcp dst-port=22 src-address-list=ssh_stage2 \
+    comment="SSH brute force - stage 3"
+add action=add-src-to-address-list address-list=ssh_stage2 address-list-timeout=1m \
+    chain=input protocol=tcp dst-port=22 src-address-list=ssh_stage1 \
+    comment="SSH brute force - stage 2"
+add action=add-src-to-address-list address-list=ssh_stage1 address-list-timeout=1m \
+    chain=input protocol=tcp dst-port=22 connection-state=new \
+    comment="SSH brute force - stage 1"
+add action=drop chain=input src-address-list=ssh_blacklist \
+    comment="Drop SSH brute force"
+
+# ============================================================================
+# NAT - тільки для WAN
+# ============================================================================
+/ip firewall nat
+add action=masquerade chain=srcnat out-interface=ether1 \
+    comment="Masquerade WAN"
+
+# ============================================================================
+# КОРИСТУВАЧІ - БЕЗПЕКА
+# ============================================================================
+
+# Створити користувача maestro з випадковим паролем
+/user
+add name=maestro group=full password="{{ client_random_password }}" comment="Admin user for {{ wg_client_name }}"
+
+# Видалити всіх інших користувачів (окрім maestro)
+
+# ============================================================================
+# SSH - ТІЛЬКИ КЛЮЧІ (БЕЗ ПАРОЛЯ)
+# ============================================================================
+/ip ssh
+set strong-crypto=yes forwarding-enabled=no host-key-size=4096
+
+# SSH публічний ключ для користувача maestro
+/user ssh-keys
+add key="{{ ssh_public_key }}" user=maestro comment="MainSSH_{{ wg_client_name }}"
+
+# ============================================================================
+# IP SERVICES - ОБМЕЖИТИ ДОСТУП
+# ============================================================================
+/ip service
+set telnet disabled=yes
+set ftp disabled=yes
+set www disabled=yes
+set ssh address={{ hostvars[groups['wireguard_servers'][0]]['wg_server_network'] }},127.0.0.1 port=22
+set api disabled=yes
+set api-ssl disabled=yes
+set winbox address={{ hostvars[groups['wireguard_servers'][0]]['wg_server_network'] }},127.0.0.1 port=8291
+
+# ============================================================================
+# SYSTEM SETTINGS
+# ============================================================================
+
+# Identity
+/system identity
+set name={{ wg_client_name }}
+
+# Clock та NTP
+/system clock
+set time-zone-autodetect=no time-zone-name=Europe/Kiev
+
+/system ntp client
+set enabled=yes
+
+/system ntp client servers
+add address=time.google.com
+add address=time.cloudflare.com
+
+# Примітка про пароль користувача maestro
+# Пароль: {{ client_random_password }}
+# Рекомендується змінити пароль або використовувати тільки SSH ключі
+
+# Logging
+/system logging
+add topics=critical action=memory
+add topics=error action=memory
+add topics=warning action=memory
+add topics=firewall action=memory
+
+# Disable unnecessary services
+/ip neighbor discovery-settings
+set discover-interface-list=!all
+
+# Disable MAC server from WAN
+/tool mac-server
+set allowed-interface-list=none
+
+/tool mac-server mac-winbox
+set allowed-interface-list=static
+
+# Disable bandwidth server
+/tool bandwidth-server
+set enabled=no
+
+# ============================================================================
+# БЕЗПЕКА - ДОДАТКОВО
+# ============================================================================
+
+# Disable IP cloud
+
+
+# Disable UPnP
+/ip upnp
+set enabled=no
+
+# Disable SOCKS
+/ip socks
+set enabled=no
+
+# Disable HTTP proxy
+/ip proxy
+set enabled=no
+
+# ============================================================================
+# ЗАВЕРШЕННЯ
+# ============================================================================
+
+# Примітки:
+# 1. SSH ключ (MainSSH) доданий автоматично
+# 2. Після імпорту підключіться через VPN для доступу до SSH/Winbox
+# 3. Перевірте що всі потрібні ether порти додані до bridge
+# 4. ether1 завжди використовується як WAN
+# 5. Клієнти bridge отримують IP через DHCP від сервера
+# 6. Клієнти bridge НЕ мають доступу до інтернету (тільки до VXLAN мережі)
+# 7. Firewall налаштований на максимальну безпеку
+# 8. SSH та Winbox доступні ТІЛЬКИ через VPN
+
+# Імпорт конфігурації:
+# /import file={{ wg_client_name }}.rsc

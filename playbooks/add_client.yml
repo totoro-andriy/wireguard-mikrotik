@@ -1,0 +1,93 @@
+---
+# Playbook для додавання нового WireGuard клієнта до MikroTik сервера
+- name: "Додати WireGuard клієнта"
+  hosts: wireguard_servers
+  gather_facts: false
+  
+  pre_tasks:
+    - name: "Отримати список існуючих WireGuard peers"
+      community.routeros.command:
+        commands:
+          - /interface wireguard peers print detail without-paging
+      register: existing_peers
+      when: client_ip is not defined or client_ip | length == 0
+    
+    - name: "Знайти перший вільний IP"
+      set_fact:
+        client_ip: "{{ '10.66.66.' + (range(2, 255) | difference(existing_peers.stdout_lines[0] | regex_findall('allowed-address=10\\.66\\.66\\.(\\d+)') | map('int') | list) | first | string) }}"
+      delegate_to: localhost
+      when: client_ip is not defined or client_ip | length == 0
+    
+    - name: "Показати автоматично призначений IP"
+      debug:
+        msg: "Автоматично призначено IP: {{ client_ip }}"
+      when: client_ip is defined
+    
+    - name: "Згенерувати ім'я клієнта з IP адреси"
+      set_fact:
+        client_name: "R6{{ client_ip.split('.')[-1] }}"
+        client_vni: "{{ ('6' ~ client_ip.split('.')[-1]) | int }}"
+      delegate_to: localhost
+    
+    - name: "Показати згенеровані дані"
+      debug:
+        msg: "IP: {{ client_ip }}, Ім'я: {{ client_name }}, VNI: {{ client_vni }}"
+    
+    - name: "Перевірка наявності ключів клієнта"
+      stat:
+        path: "{{ client_keys_dir }}/{{ client_name }}.json"
+      register: keys_file
+      delegate_to: localhost
+    
+    - name: "Згенерувати ключі якщо їх немає"
+      command: "{{ playbook_dir }}/../scripts/generate_keys.py {{ client_name }}"
+      args:
+        chdir: "{{ playbook_dir }}/.."
+      delegate_to: localhost
+      when: not keys_file.stat.exists
+      register: key_generation
+    
+    - name: "Показати результат генерації ключів"
+      debug:
+        msg: "✅ Ключі згенеровано для {{ client_name }}"
+      when: key_generation.changed | default(false)
+    
+    - name: "Завантажити ключі клієнта"
+      set_fact:
+        client_keys: "{{ lookup('file', client_keys_dir + '/' + client_name + '.json') | from_json }}"
+      delegate_to: localhost
+    
+    - name: "Згенерувати випадковий пароль для клієнта"
+      set_fact:
+        client_random_password: "{{ lookup('password', '/dev/null length=20 chars=ascii_letters,digits') }}"
+      delegate_to: localhost
+  
+  roles:
+    - role: wireguard_mikrotik
+      vars:
+        wg_action: "add"
+        wg_client_name: "{{ client_name }}"
+        wg_client_ip: "{{ client_ip }}"
+        wg_client_public_key: "{{ client_keys.public_key }}"
+        wg_client_private_key: "{{ client_keys.private_key }}"
+        wg_client_preshared_key: "{{ client_keys.preshared_key }}"
+        vxlan_vni: "{{ client_vni }}"
+        generate_client_config: true
+        add_vxlan_vtep: true
+  
+  post_tasks:
+    - name: "Вивести підсумок"
+      debug:
+        msg:
+          - "╔════════════════════════════════════════════════════════╗"
+          - "║  WireGuard клієнт успішно додано!                      ║"
+          - "╠════════════════════════════════════════════════════════╣"
+          - "║  Клієнт: {{ client_name }}"
+          - "║  IP адреса: {{ client_ip }}"
+          - "║  Користувач: maestro"
+          - "║  Пароль: {{ client_random_password }}"
+          - "║  Конфігурація: {{ configs_output_dir }}/{{ client_name }}.rsc"
+          - "╠════════════════════════════════════════════════════════╣"
+          - "║  ВАЖЛИВО: Збережіть пароль в безпечному місці!         ║"
+          - "║  SSH доступ також працює по ключу MainSSH              ║"
+          - "╚════════════════════════════════════════════════════════╝"

@@ -1,0 +1,25 @@
+---
+# Tasks для видалення WireGuard peer
+
+- name: "Видалити WireGuard peer {{ wg_client_name }}"
+  community.routeros.command:
+    commands:
+      - /interface wireguard peers remove [find name={{ wg_client_name }}]
+  register: remove_peer_result
+  failed_when:
+    - remove_peer_result.failed
+    - "'no such item' not in remove_peer_result.msg | default('')"
+
+- name: "Видалити VXLAN інтерфейс для {{ wg_client_name }}"
+  community.routeros.command:
+    commands:
+      - /interface vxlan remove [find name=vxlan-{{ wg_client_name }}]
+  when: add_vxlan_vtep | bool
+  register: remove_vxlan_result
+  failed_when:
+    - remove_vxlan_result.failed
+    - "'no such item' not in remove_vxlan_result.msg | default('')"
+
+- name: "Вивести інформацію про видалення"
+  debug:
+    msg: "WireGuard peer {{ wg_client_name }} успішно видалено"

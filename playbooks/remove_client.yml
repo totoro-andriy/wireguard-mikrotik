@@ -1,0 +1,44 @@
+---
+# Playbook для видалення WireGuard клієнта з MikroTik сервера
+- name: "Видалити WireGuard клієнта"
+  hosts: wireguard_servers
+  gather_facts: false
+  
+  vars_prompt:
+    - name: client_ip
+      prompt: "Введіть IP адресу клієнта"
+      private: false
+  
+  pre_tasks:
+    - name: "Згенерувати ім'я клієнта з IP адреси"
+      set_fact:
+        client_name: "R6{{ client_ip.split('.')[-1] }}"
+        client_vni: "{{ ('6' ~ client_ip.split('.')[-1]) | int }}"
+      delegate_to: localhost
+    
+    - name: "Підтвердження видалення"
+      pause:
+        prompt: |
+          
+          УВАГА! Ви збираєтеся видалити клієнта: {{ client_name }} ({{ client_ip }})
+          Це видалить WireGuard peer та VXLAN інтерфейс на сервері.
+          
+          Натисніть Enter для продовження або Ctrl+C для скасування
+      when: not skip_confirmation | default(false) | bool
+  
+  roles:
+    - role: wireguard_mikrotik
+      vars:
+        wg_action: "remove"
+        wg_client_name: "{{ client_name }}"
+        wg_client_ip: "{{ client_ip }}"
+        vxlan_vni: "{{ client_vni }}"
+        add_vxlan_vtep: true
+        vxlan_client_remote_ip: "{{ client_ip | regex_replace('/32', '') }}"
+  
+  post_tasks:
+    - name: "Вивести підсумок"
+      debug:
+        msg:
+          - "WireGuard клієнт {{ client_name }} видалено"
+          - "Не забудьте також видалити конфігураційні файли та ключі вручну якщо потрібно"
