@@ -1,0 +1,13 @@
+services:
+  ansible:
+    build:
+      context: ./ansible
+      dockerfile: Dockerfile
+    image: ${ANSIBLE_IMAGE:-wireguard-mikrotik-ansible:latest}
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+    volumes:
+      - ./ansible:/workspace
+    environment:
+      ANSIBLE_CONFIG: /workspace/ansible.cfg
